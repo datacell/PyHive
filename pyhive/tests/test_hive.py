@@ -6,19 +6,28 @@ They also require a tables created by make_test_tables.sh.
 
 from __future__ import absolute_import
 from __future__ import unicode_literals
+
+import contextlib
+import subprocess
+import time
+import unittest
+
+import mock
+import os
+import sasl
+import thrift.transport.TSocket
+import thrift.transport.TTransport
+import thrift_sasl
+from thrift.transport.TTransport import TTransportException
+
 from TCLIService import ttypes
 from pyhive import hive
 from pyhive.tests.dbapi_test_case import DBAPITestCase
 from pyhive.tests.dbapi_test_case import with_cursor
-import contextlib
-import mock
-import unittest
-import sys
 
 _HOST = 'localhost'
 
 
-@unittest.skipIf(sys.version_info.major == 3, 'Hive not yet supported on Python 3')
 class TestHive(unittest.TestCase, DBAPITestCase):
     __test__ = True
 
@@ -29,28 +38,28 @@ class TestHive(unittest.TestCase, DBAPITestCase):
     def test_description(self, cursor):
         cursor.execute('SELECT * FROM one_row')
 
-        desc = [('number_of_rows', 'INT_TYPE', None, None, None, None, True)]
+        desc = [('one_row.number_of_rows', 'INT_TYPE', None, None, None, None, True)]
         self.assertEqual(cursor.description, desc)
 
     @with_cursor
     def test_complex(self, cursor):
         cursor.execute('SELECT * FROM one_row_complex')
         self.assertEqual(cursor.description, [
-            ('boolean', 'BOOLEAN_TYPE', None, None, None, None, True),
-            ('tinyint', 'TINYINT_TYPE', None, None, None, None, True),
-            ('smallint', 'SMALLINT_TYPE', None, None, None, None, True),
-            ('int', 'INT_TYPE', None, None, None, None, True),
-            ('bigint', 'BIGINT_TYPE', None, None, None, None, True),
-            ('float', 'FLOAT_TYPE', None, None, None, None, True),
-            ('double', 'DOUBLE_TYPE', None, None, None, None, True),
-            ('string', 'STRING_TYPE', None, None, None, None, True),
-            ('timestamp', 'TIMESTAMP_TYPE', None, None, None, None, True),
-            ('binary', 'BINARY_TYPE', None, None, None, None, True),
-            ('array', 'ARRAY_TYPE', None, None, None, None, True),
-            ('map', 'MAP_TYPE', None, None, None, None, True),
-            ('struct', 'STRUCT_TYPE', None, None, None, None, True),
-            ('union', 'UNION_TYPE', None, None, None, None, True),
-            ('decimal', 'DECIMAL_TYPE', None, None, None, None, True),
+            ('one_row_complex.boolean', 'BOOLEAN_TYPE', None, None, None, None, True),
+            ('one_row_complex.tinyint', 'TINYINT_TYPE', None, None, None, None, True),
+            ('one_row_complex.smallint', 'SMALLINT_TYPE', None, None, None, None, True),
+            ('one_row_complex.int', 'INT_TYPE', None, None, None, None, True),
+            ('one_row_complex.bigint', 'BIGINT_TYPE', None, None, None, None, True),
+            ('one_row_complex.float', 'FLOAT_TYPE', None, None, None, None, True),
+            ('one_row_complex.double', 'DOUBLE_TYPE', None, None, None, None, True),
+            ('one_row_complex.string', 'STRING_TYPE', None, None, None, None, True),
+            ('one_row_complex.timestamp', 'TIMESTAMP_TYPE', None, None, None, None, True),
+            ('one_row_complex.binary', 'BINARY_TYPE', None, None, None, None, True),
+            ('one_row_complex.array', 'ARRAY_TYPE', None, None, None, None, True),
+            ('one_row_complex.map', 'MAP_TYPE', None, None, None, None, True),
+            ('one_row_complex.struct', 'STRUCT_TYPE', None, None, None, None, True),
+            ('one_row_complex.union', 'UNION_TYPE', None, None, None, None, True),
+            ('one_row_complex.decimal', 'DECIMAL_TYPE', None, None, None, None, True),
         ])
         rows = cursor.fetchall()
         expected = [(
@@ -97,9 +106,9 @@ class TestHive(unittest.TestCase, DBAPITestCase):
             async=True
         )
         self.assertEqual(cursor.poll().operationState, ttypes.TOperationState.RUNNING_STATE)
+        assert any('Stage' in line for line in cursor.fetch_logs())
         cursor.cancel()
         self.assertEqual(cursor.poll().operationState, ttypes.TOperationState.CANCELED_STATE)
-        assert any('Stage' in line for line in cursor.fetch_logs())
 
     def test_noops(self):
         """The DB-API specification requires that certain actions exist, even though they might not
@@ -139,3 +148,71 @@ class TestHive(unittest.TestCase, DBAPITestCase):
         cursor.execute('USE default')
         self.assertIsNone(cursor.description)
         self.assertRaises(hive.ProgrammingError, cursor.fetchone)
+
+    def test_ldap_connection(self):
+        rootdir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        orig_ldap = os.path.join(rootdir, 'scripts', 'travis-conf', 'hive', 'hive-site-ldap.xml')
+        orig_none = os.path.join(rootdir, 'scripts', 'travis-conf', 'hive', 'hive-site.xml')
+        des = os.path.join('/', 'etc', 'hive', 'conf', 'hive-site.xml')
+        try:
+            subprocess.check_call(['sudo', 'cp', orig_ldap, des])
+            subprocess.check_call(['sudo', 'service', 'hive-server2', 'restart'])
+            time.sleep(10)
+            with contextlib.closing(hive.connect(
+                host=_HOST, username='existing', auth='LDAP', password='testpw')
+            ) as connection:
+                with contextlib.closing(connection.cursor()) as cursor:
+                    cursor.execute('SELECT * FROM one_row')
+                    self.assertEqual(cursor.fetchall(), [(1,)])
+
+            self.assertRaisesRegexp(
+                TTransportException, 'Error validating the login',
+                lambda: hive.connect(
+                    host=_HOST, username='existing', auth='LDAP', password='wrong')
+            )
+
+        finally:
+            subprocess.check_call(['sudo', 'cp', orig_none, des])
+            subprocess.check_call(['sudo', 'service', 'hive-server2', 'restart'])
+            time.sleep(10)
+
+    def test_invalid_ldap_config(self):
+        """password should be set if and only if using LDAP"""
+        self.assertRaisesRegexp(ValueError, 'password.*LDAP',
+                                lambda: hive.connect(_HOST, password=''))
+        self.assertRaisesRegexp(ValueError, 'password.*LDAP',
+                                lambda: hive.connect(_HOST, auth='LDAP'))
+
+    def test_invalid_kerberos_config(self):
+        """kerberos_service_name should be set if and only if using KERBEROS"""
+        self.assertRaisesRegexp(ValueError, 'kerberos_service_name.*KERBEROS',
+                                lambda: hive.connect(_HOST, kerberos_service_name=''))
+        self.assertRaisesRegexp(ValueError, 'kerberos_service_name.*KERBEROS',
+                                lambda: hive.connect(_HOST, auth='KERBEROS'))
+
+    def test_invalid_transport(self):
+        """transport and auth are incompatible"""
+        socket = thrift.transport.TSocket.TSocket('localhost', 10000)
+        transport = thrift.transport.TTransport.TBufferedTransport(socket)
+        self.assertRaisesRegexp(
+            ValueError, 'thrift_transport cannot be used with',
+            lambda: hive.connect(_HOST, thrift_transport=transport)
+        )
+
+    def test_custom_transport(self):
+        socket = thrift.transport.TSocket.TSocket('localhost', 10000)
+        sasl_auth = 'PLAIN'
+
+        def sasl_factory():
+            sasl_client = sasl.Client()
+            sasl_client.setAttr('host', 'localhost')
+            sasl_client.setAttr('username', 'test_username')
+            sasl_client.setAttr('password', 'x')
+            sasl_client.init()
+            return sasl_client
+        transport = thrift_sasl.TSaslClientTransport(sasl_factory, sasl_auth, socket)
+        conn = hive.connect(thrift_transport=transport)
+        with contextlib.closing(conn):
+            with contextlib.closing(conn.cursor()) as cursor:
+                cursor.execute('SELECT * FROM one_row')
+                self.assertEqual(cursor.fetchall(), [(1,)])
