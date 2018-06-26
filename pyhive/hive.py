@@ -69,7 +69,7 @@ class Connection(object):
 
     def __init__(self, host=None, port=None, username=None, database='default', auth=None,
                  configuration=None, kerberos_service_name=None, password=None,
-                 thrift_transport=None):
+                 thrift_transport=None, use_ssl=False, ca_cert_path=None):
         """Connect to HiveServer2
 
         :param host: What host HiveServer2 runs on
@@ -113,7 +113,10 @@ class Connection(object):
                 port = 10000
             if auth is None:
                 auth = 'NONE'
-            socket = thrift.transport.TSocket.TSocket(host, port)
+            if use_ssl:
+                socket = thrift.transport.TSSLSocket.TSSLSocket(host, port, ca_certs=ca_cert_path)
+            else:
+                socket = thrift.transport.TSocket.TSocket(host, port)
             if auth == 'NOSASL':
                 # NOSASL corresponds to hive.server2.authentication=NOSASL in hive-site.xml
                 self._transport = thrift.transport.TTransport.TBufferedTransport(socket)
