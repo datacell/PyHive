@@ -88,8 +88,8 @@ class Connection(object):
         """
         username = username or getpass.getuser()
         configuration = configuration or {}
-
-        if (password is not None) != (auth == 'LDAP'):
+	
+        if (password is not None and password != 'NONE') != (auth == 'LDAP'):
             raise ValueError("Password should be set if and only if in LDAP mode; "
                              "Remove password or add auth='LDAP'")
         if (kerberos_service_name is not None) != (auth == 'KERBEROS'):
@@ -111,7 +111,7 @@ class Connection(object):
         else:
             if port is None:
                 port = 10000
-            if auth is None:
+            if auth in [None, 'NONE']:
                 auth = 'NONE'
             if use_ssl:
                 socket = thrift.transport.TSSLSocket.TSSLSocket(host, port, ca_certs=ca_cert_path)
@@ -138,7 +138,7 @@ class Connection(object):
                     sasl_client = sasl.Client()
                     sasl_client.setAttr(b'host', host.encode('ascii','ignore'))
                     if sasl_auth == 'GSSAPI':
-                        sasl_client.setAttr(b'service', kerberos_service_name)
+                        sasl_client.setAttr(b'service', kerberos_service_name.encode('ascii','ignore'))
                     elif sasl_auth == 'PLAIN':
                         sasl_client.setAttr(b'username', username.encode('ascii','ignore'))
                         sasl_client.setAttr(b'password', password.encode('ascii','ignore'))
