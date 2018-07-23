@@ -136,17 +136,17 @@ class Connection(object):
 
                 def sasl_factory():
                     sasl_client = sasl.Client()
-                    sasl_client.setAttr('host', host)
+                    sasl_client.setAttr(b'host', host.encode('ascii','ignore'))
                     if sasl_auth == 'GSSAPI':
-                        sasl_client.setAttr('service', kerberos_service_name)
+                        sasl_client.setAttr(b'service', kerberos_service_name)
                     elif sasl_auth == 'PLAIN':
-                        sasl_client.setAttr('username', username)
-                        sasl_client.setAttr('password', password)
+                        sasl_client.setAttr(b'username', username.encode('ascii','ignore'))
+                        sasl_client.setAttr(b'password', password.encode('ascii','ignore'))
                     else:
                         raise AssertionError
                     sasl_client.init()
                     return sasl_client
-                self._transport = thrift_sasl.TSaslClientTransport(sasl_factory, sasl_auth, socket)
+                self._transport = thrift_sasl.TSaslClientTransport(sasl_factory, sasl_auth.encode('ascii','ignore'), socket)
             else:
                 raise NotImplementedError(
                     "Only NONE, NOSASL, LDAP, KERBEROS "
