@@ -89,9 +89,9 @@ class Connection(object):
         username = username or getpass.getuser()
         configuration = configuration or {}
 	
-        if (password is not None and password != 'NONE') != (auth == 'LDAP'):
-            raise ValueError("Password should be set if and only if in LDAP mode; "
-                             "Remove password or add auth='LDAP'")
+        if (password is not None and password != 'NONE') != (auth == 'LDAP' or auth == 'NONE'):
+            raise ValueError("Password should be set if and only if in LDAP or NONE mode; "
+                             "Remove password or add auth='LDAP' or auth='NONE'")
         if (kerberos_service_name is not None) != (auth == 'KERBEROS'):
             raise ValueError("kerberos_service_name should be set if and only if in KERBEROS mode")
         if thrift_transport is not None:
@@ -141,7 +141,7 @@ class Connection(object):
                         sasl_client.setAttr(b'service', kerberos_service_name.encode('ascii','ignore'))
                     elif sasl_auth == 'PLAIN':
                         sasl_client.setAttr(b'username', username.encode('ascii','ignore'))
-                        sasl_client.setAttr(b'password', password.encode('ascii','ignore'))
+                        sasl_client.setAttr(b'password', password)
                     else:
                         raise AssertionError
                     sasl_client.init()
